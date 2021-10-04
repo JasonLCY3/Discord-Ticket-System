@@ -16,12 +16,13 @@ class Events(commands.Cog):
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload):
+        user_id = payload.user_id
+        user = self.client.get_user(user_id)
+        if  user.bot:
+            return
 
         guild_id = payload.guild_id
         guild = self.client.get_guild(guild_id)
-
-        user_id = payload.user_id
-        user = self.client.get_user(user_id)
 
         channel_id = payload.channel_id
         channel = self.client.get_channel(channel_id)
@@ -29,11 +30,9 @@ class Events(commands.Cog):
         message_id = payload.message_id
         emoji = payload.emoji.name
 
-        ticket_id = await self.client.db.fetchrow("SELECT ticket_id FROM tickets WHERE guild_id = $1", guild_id)
-
         ######################### TICKETS #########################
 
-        if emoji == "📩" and not user.bot:
+        if emoji == "📩":
 
             query = """SELECT ticket_id FROM tickets WHERE guild_id = $1"""
             ticket_id = await self.client.db.fetchrow(query, guild_id)
@@ -58,7 +57,7 @@ class Events(commands.Cog):
                     except Exception:
                         return
 
-                member = discord.utils.find(lambda m : m.id == payload.user_id, guild.members)
+                member = await guild.fetch_member(user_id)
                 support_role = discord.utils.get(guild.roles, name = "Support")
                 category = discord.utils.get(guild.categories, name = "Tickets")
 
@@ -67,7 +66,7 @@ class Events(commands.Cog):
 
                 if category is None:
                     new_category = await guild.create_category(name="Tickets")
-                    category = guild.get_channel(new_category.id)
+                    category = await guild.fetch_channel(new_category.id)
 
                 overwrites = {
                     guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -75,10 +74,10 @@ class Events(commands.Cog):
                     support_role: discord.PermissionOverwrite(read_messages=True, send_messages=True)
                 }
 
-                ticket_channel_name = await category.create_text_channel(f'ticket-{random.randint(100,999)}', overwrites=overwrites)
+                ticket_channel = await category.create_text_channel(f'ticket-{random.randint(100,999)}', overwrites=overwrites)
 
                 query = """INSERT INTO requests (guild_id, channel_name, channel_id, user_id) VALUES ($1, $2, $3, $4)"""
-                await self.client.db.execute(query, guild.id, str(ticket_channel_name), ticket_channel_name.id, user_id)
+                await self.client.db.execute(query, guild.id, ticket_channel.name, ticket_channel.id, user_id)
 
                 embed = discord.Embed(title="How can we help you?", color=self.client.color).set_image(url="https://i.imgur.com/Oegyaex.jpg")
                 embed.description = "You can already write your questions in the chat, a supporter will take care of you as soon as possible. "
@@ -87,20 +86,17 @@ class Events(commands.Cog):
                 embed.description += "`📌` **Inform the support about your ticket.**\n"
                 embed.description += "`🔒`  **Close the ticket when all questions have been answered.**"
 
-                ticket_channel_message = await ticket_channel_name.send(embed=embed)
+                ticket_channel_message = await ticket_channel.send(embed=embed)
 
                 await ticket_channel_message.add_reaction("✅")
                 await ticket_channel_message.add_reaction("📌")
                 await ticket_channel_message.add_reaction("🔒")
 
-        if emoji == "✅" and user.bot == False:
+        if emoji == "✅":
 
             query = """SELECT channel_id FROM requests WHERE guild_id = $1"""
             ticket_ids = await self.client.db.fetch(query, guild.id)
-            ticket_channel_ids = []
-
-            for ticket_id in ticket_ids:
-                ticket_channel_ids.append(ticket_id["channel_id"])
+            ticket_channel_ids = [ticket_id["channel_id"] for ticket_id in ticket_ids]
 
             if channel_id in ticket_channel_ids:
                 
@@ -128,14 +124,11 @@ class Events(commands.Cog):
 
                     await channel.send(embed=embed)
         
-        if emoji == "🔒" and user.bot == False:
+        if emoji == "🔒":
 
             query = """SELECT channel_id FROM requests WHERE guild_id = $1"""
             ticket_ids = await self.client.db.fetch(query, guild.id)
-            ticket_channel_ids = []
-
-            for ticket_id in ticket_ids:
-                ticket_channel_ids.append(ticket_id["channel_id"])
+            ticket_channel_ids = [ticket_id["channel_id"] for ticket_id in ticket_ids]
 
             if channel_id in ticket_channel_ids:
 
@@ -146,9 +139,7 @@ class Events(commands.Cog):
                     description = f"**The ticket was closed by {user.name}.**",
                     color = 0x2F3136)
 
-                await channel.send(embed=embed)
-                await asyncio.sleep(10)
-                await channel.delete()
+                await channel.send(embed=embed, delete_after=10)
 
                 channel_log = discord.utils.get(guild.text_channels, name="overall-log")
                 overwrites = {guild.default_role: discord.PermissionOverwrite(send_messages=False)}

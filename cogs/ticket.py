@@ -35,8 +35,7 @@ class Ticket(commands.Cog):
         embed = discord.Embed(color=0x2F3136)
         embed.set_author(name="Successfully created the ticket-system.")
 
-        confirmEmbed = await ctx.send(embed=embed)
-        await confirmEmbed.delete(delay=10)
+        await ctx.send(embed=embed, delete_after=10)
 
 def setup(client):
     client.add_cog(Ticket(client))
